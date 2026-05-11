@@ -1,10 +1,16 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Activity,
+  AudioLines,
+  Clock3,
   Download,
   Headphones,
   Loader2,
   Plus,
+  Radio,
   RefreshCw,
+  Server,
+  Settings2,
   Sparkles,
   Trash2,
   Users,
@@ -77,6 +83,8 @@ export function App() {
     (job) => job.status === 'Pending' || job.status === 'Processing'
   );
   const detectedSpeakers = useMemo(() => extractSpeakers(editText), [editText]);
+  const scriptStats = useMemo(() => getScriptStats(editText), [editText]);
+  const enabledEngines = useMemo(() => summarizeEngines(voices), [voices]);
   const selectedVoice = useMemo(
     () => voices.find((voice) => voice.code === voiceProfileCode) ?? null,
     [voiceProfileCode, voices]
@@ -167,12 +175,12 @@ export function App() {
     setSpeakerVoiceProfileCodes((current) =>
       seedSpeakerVoices(current, detectedSpeakers, dialogueVoiceOptions, voiceProfileCode)
     );
-  }, [detectedSpeakers, dialogueVoiceOptions, voiceProfileCode]);
+  }, [detectedSpeakers, dialogueVoiceOptions, voiceProfileCode, voices.length]);
 
-  const canGenerate = useMemo(() => Boolean(selectedProject && voiceProfileCode), [
-    selectedProject,
-    voiceProfileCode
-  ]);
+  const canGenerate = useMemo(
+    () => Boolean(selectedProject && voiceProfileCode),
+    [selectedProject, voiceProfileCode]
+  );
 
   async function createProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -275,243 +283,335 @@ export function App() {
   }
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
+    <main className="studio-shell">
+      <header className="studio-topbar">
+        <div className="studio-brand">
           <div className="brand-mark">
-            <Headphones size={22} />
+            <Headphones size={21} />
           </div>
           <div>
-            <h1>Cozy TTS</h1>
-            <p>English listening studio</p>
+            <p className="kicker">Self-hosted voice lab</p>
+            <h1>Cozy TTS Soundstage</h1>
           </div>
         </div>
 
-        <form className="new-project" onSubmit={createProject}>
-          <label>
-            <span>Title</span>
-            <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} />
-          </label>
-          <label>
-            <span>Source text</span>
-            <textarea
-              rows={8}
-              value={draftText}
-              onChange={(event) => setDraftText(event.target.value)}
-            />
-          </label>
-          <button className="primary-button" type="submit" disabled={isSaving}>
-            {isSaving ? <Loader2 className="spin" size={18} /> : <Plus size={18} />}
-            Save project
-          </button>
-        </form>
-
-        <section className="project-list" aria-label="Projects">
-          {projects.map((project) => (
-            <button
-              key={project.id}
-              className={`project-row ${project.id === selectedProject?.id ? 'active' : ''}`}
-              type="button"
-              onClick={() => selectProject(project.id)}
-            >
-              <span>{project.title}</span>
-              <small>{project.jobsCount} jobs</small>
-            </button>
+        <div className="system-strip" aria-label="System status">
+          <span className="system-pill active">
+            <Server size={15} />
+            Local
+          </span>
+          {enabledEngines.map((engine) => (
+            <span className="system-pill" key={engine}>
+              {engine}
+            </span>
           ))}
-          {!isLoading && projects.length === 0 ? <p className="empty">No projects yet</p> : null}
-        </section>
-      </aside>
-
-      <section className="workspace">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Self-hosted Piper + Qwen TTS</p>
-            <h2>{selectedProject?.title ?? 'Create a project'}</h2>
-          </div>
-          {selectedProject ? (
-            <button className="icon-button danger" type="button" onClick={deleteSelectedProject} title="Delete project">
-              <Trash2 size={18} />
-            </button>
+          {selectedLatestJob ? (
+            <span className={`system-pill status-${selectedLatestJob.status.toLowerCase()}`}>
+              <Activity size={15} />
+              {selectedLatestJob.status}
+            </span>
           ) : null}
-        </header>
+          {selectedLatestJob?.audioFile?.durationSeconds ? (
+            <span className="system-pill">
+              <Clock3 size={15} />
+              {formatDuration(selectedLatestJob.audioFile.durationSeconds)}
+            </span>
+          ) : null}
+        </div>
+      </header>
 
-        {error ? <div className="error-panel">{error}</div> : null}
+      {error ? <div className="error-panel">{error}</div> : null}
+
+      <section className="studio-layout">
+        <aside className="episode-rail">
+          <form className="episode-composer" onSubmit={createProject}>
+            <div className="rail-heading">
+              <Plus size={17} />
+              <span>New Episode</span>
+            </div>
+            <label>
+              <span>Title</span>
+              <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} />
+            </label>
+            <label>
+              <span>Script seed</span>
+              <textarea
+                rows={6}
+                value={draftText}
+                onChange={(event) => setDraftText(event.target.value)}
+              />
+            </label>
+            <button className="primary-button" type="submit" disabled={isSaving}>
+              {isSaving ? <Loader2 className="spin" size={18} /> : <Plus size={18} />}
+              Create
+            </button>
+          </form>
+
+          <section className="episode-stack" aria-label="Projects">
+            <div className="rail-heading">
+              <Radio size={17} />
+              <span>Episodes</span>
+            </div>
+            {projects.map((project) => (
+              <button
+                key={project.id}
+                className={`episode-card ${project.id === selectedProject?.id ? 'active' : ''}`}
+                type="button"
+                onClick={() => selectProject(project.id)}
+              >
+                <span>{project.title}</span>
+                <small>{project.jobsCount} renders</small>
+              </button>
+            ))}
+            {!isLoading && projects.length === 0 ? <p className="empty">No episodes</p> : null}
+          </section>
+        </aside>
 
         {selectedProject ? (
-          <div className="content-grid">
-            <section className="panel editor-panel">
-              <div className="panel-heading">
-                <Volume2 size={18} />
-                <h3>Source</h3>
-              </div>
-              <label>
-                <span>Project title</span>
-                <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
-              </label>
-              <label>
-                <span>Source text</span>
-                <textarea
-                  className="source-view"
-                  value={editText}
-                  onChange={(event) => setEditText(event.target.value)}
-                />
-              </label>
-              <button className="primary-button save-changes" type="button" disabled={isUpdating} onClick={updateSelectedProject}>
-                {isUpdating ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
-                Save changes
-              </button>
-            </section>
-
-            <section className="panel controls-panel">
-              <div className="panel-heading">
-                <Sparkles size={18} />
-                <h3>Generation</h3>
-              </div>
-
-              <label>
-                <span>Default voice</span>
-                <select value={voiceProfileCode} onChange={(event) => setVoiceProfileCode(event.target.value)}>
-                  {voices.map((voice) => (
-                    <option key={voice.id} value={voice.code}>
-                      {formatVoiceLabel(voice)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              {selectedVoice ? (
-                <div className="voice-hint">
-                  <span className="engine-badge">{engineLabel(selectedVoice.engine)}</span>
-                  {selectedVoice.qwenLanguage ? <span>{selectedVoice.qwenLanguage}</span> : null}
-                  {selectedVoice.qwenSpeaker ? <span>{selectedVoice.qwenSpeaker}</span> : null}
+          <div className="producer-board">
+            <section className="script-stage">
+              <div className="stage-header">
+                <div>
+                  <p className="kicker">Now editing</p>
+                  <h2>{selectedProject.title}</h2>
                 </div>
-              ) : null}
-
-              <label>
-                <span>Language</span>
-                <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-                  {languages.map((item) => (
-                    <option key={item.value || 'profile'} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span>Emotion / style</span>
-                <textarea
-                  className="emotion-input"
-                  rows={3}
-                  value={emotionPrompt}
-                  placeholder="warm, calm, smiling; or Russian style instruction"
-                  onChange={(event) => setEmotionPrompt(event.target.value)}
-                />
-              </label>
-
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={useDialogueVoices}
-                  onChange={(event) => setUseDialogueVoices(event.target.checked)}
-                />
-                <span>Dialogue voices</span>
-              </label>
-
-              {useDialogueVoices ? (
-                <div className="speaker-map">
-                  <div className="panel-heading compact">
-                    <Users size={17} />
-                    <h3>Speakers</h3>
-                  </div>
-                  {(detectedSpeakers.length > 0 ? detectedSpeakers : ['Emma', 'Alex']).map((speaker) => (
-                    <label key={speaker} className="speaker-row">
-                      <span>{speaker}</span>
-                      <select
-                        value={getSpeakerVoiceValue(
-                          speaker,
-                          speakerVoiceProfileCodes,
-                          voiceProfileCode,
-                          dialogueVoiceOptions
-                        )}
-                        onChange={(event) =>
-                          setSpeakerVoiceProfileCodes((current) => ({
-                            ...current,
-                            [speaker]: event.target.value
-                          }))
-                        }
-                      >
-                        {dialogueVoiceOptions.map((voice) => (
-                          <option key={voice.id} value={voice.code}>
-                            {formatVoiceLabel(voice)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ))}
-                </div>
-              ) : null}
-
-              <div className="segmented">
-                {speeds.map((item) => (
+                <div className="stage-tools">
                   <button
-                    key={item.value}
-                    className={speed === item.value ? 'selected' : ''}
+                    className="icon-button danger"
                     type="button"
-                    onClick={() => setSpeed(item.value)}
+                    onClick={deleteSelectedProject}
+                    title="Delete project"
                   >
-                    {item.label}
+                    <Trash2 size={18} />
                   </button>
-                ))}
+                </div>
               </div>
 
-              <div className="segmented">
-                {formats.map((item) => (
-                  <button
-                    key={item.value}
-                    className={outputFormat === item.value ? 'selected' : ''}
-                    type="button"
-                    onClick={() => setOutputFormat(item.value)}
-                  >
-                    {item.label}
-                  </button>
+              <WaveformDeck status={selectedLatestJob?.status ?? 'Idle'} />
+
+              <div className="script-metrics" aria-label="Script metrics">
+                <span>{scriptStats.characters.toLocaleString()} chars</span>
+                <span>{scriptStats.words.toLocaleString()} words</span>
+                <span>{detectedSpeakers.length || 1} speaker{(detectedSpeakers.length || 1) === 1 ? '' : 's'}</span>
+              </div>
+
+              <div className="script-card">
+                <label>
+                  <span>Episode title</span>
+                  <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
+                </label>
+                <label>
+                  <span>Dialogue script</span>
+                  <textarea
+                    className="source-view"
+                    value={editText}
+                    onChange={(event) => setEditText(event.target.value)}
+                  />
+                </label>
+              </div>
+
+              <div className="speaker-strip" aria-label="Detected speakers">
+                {(detectedSpeakers.length > 0 ? detectedSpeakers : ['Narrator']).map((speaker, index) => (
+                  <span key={speaker}>
+                    <Users size={14} />
+                    Track {index + 1}: {speaker}
+                  </span>
                 ))}
               </div>
 
               <button
-                className="primary-button generate"
+                className="secondary-button save-changes"
                 type="button"
-                disabled={!canGenerate || isGenerating}
-                onClick={generateAudio}
+                disabled={isUpdating}
+                onClick={updateSelectedProject}
               >
-                {isGenerating ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
-                Generate
+                {isUpdating ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
+                Save draft
               </button>
-
-              {selectedLatestJob ? <JobStatusBlock job={selectedLatestJob} /> : null}
             </section>
 
-            <section className="panel history-panel">
-              <div className="panel-heading">
-                <RefreshCw size={18} />
-                <h3>History</h3>
+            <aside className="director-panel">
+              <section className="control-deck">
+                <div className="deck-heading">
+                  <Settings2 size={18} />
+                  <div>
+                    <h3>Voice Director</h3>
+                    <p>{selectedVoice ? engineLabel(selectedVoice.engine) : 'No voice selected'}</p>
+                  </div>
+                </div>
+
+                <div className="engine-card">
+                  <div>
+                    <span>Render engine</span>
+                    <strong>{selectedVoice ? engineLabel(selectedVoice.engine) : 'Select voice'}</strong>
+                  </div>
+                  <AudioLines size={26} />
+                </div>
+
+                <label>
+                  <span>Lead voice</span>
+                  <select value={voiceProfileCode} onChange={(event) => setVoiceProfileCode(event.target.value)}>
+                    {voices.map((voice) => (
+                      <option key={voice.id} value={voice.code}>
+                        {formatVoiceLabel(voice)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {selectedVoice ? (
+                  <div className="voice-tags">
+                    <span>{engineLabel(selectedVoice.engine)}</span>
+                    {selectedVoice.qwenLanguage ? <span>{selectedVoice.qwenLanguage}</span> : null}
+                    {selectedVoice.qwenSpeaker ? <span>{selectedVoice.qwenSpeaker}</span> : null}
+                  </div>
+                ) : null}
+
+                <div className="control-grid">
+                  <label>
+                    <span>Language</span>
+                    <select value={language} onChange={(event) => setLanguage(event.target.value)}>
+                      {languages.map((item) => (
+                        <option key={item.value || 'profile'} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label>
+                    <span>Format</span>
+                    <select value={outputFormat} onChange={(event) => setOutputFormat(event.target.value as OutputFormat)}>
+                      {formats.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <label>
+                  <span>Performance note</span>
+                  <textarea
+                    className="emotion-input"
+                    rows={3}
+                    value={emotionPrompt}
+                    placeholder="warm, calm, smiling"
+                    onChange={(event) => setEmotionPrompt(event.target.value)}
+                  />
+                </label>
+
+                <div className="speed-rack" aria-label="Speech speed">
+                  {speeds.map((item) => (
+                    <button
+                      key={item.value}
+                      className={speed === item.value ? 'selected' : ''}
+                      type="button"
+                      onClick={() => setSpeed(item.value)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
+                <label className="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={useDialogueVoices}
+                    onChange={(event) => setUseDialogueVoices(event.target.checked)}
+                  />
+                  <span>Separate dialogue voices</span>
+                </label>
+
+                {useDialogueVoices ? (
+                  <div className="cast-board">
+                    <div className="rail-heading">
+                      <Users size={17} />
+                      <span>Cast</span>
+                    </div>
+                    {(detectedSpeakers.length > 0 ? detectedSpeakers : ['Emma', 'Alex']).map((speaker) => (
+                      <label key={speaker} className="speaker-row">
+                        <span>{speaker}</span>
+                        <select
+                          value={getSpeakerVoiceValue(
+                            speaker,
+                            speakerVoiceProfileCodes,
+                            voiceProfileCode,
+                            dialogueVoiceOptions
+                          )}
+                          onChange={(event) =>
+                            setSpeakerVoiceProfileCodes((current) => ({
+                              ...current,
+                              [speaker]: event.target.value
+                            }))
+                          }
+                        >
+                          {dialogueVoiceOptions.map((voice) => (
+                            <option key={voice.id} value={voice.code}>
+                              {formatVoiceLabel(voice)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+
+                <button
+                  className="primary-button generate"
+                  type="button"
+                  disabled={!canGenerate || isGenerating}
+                  onClick={generateAudio}
+                >
+                  {isGenerating ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
+                  Render audio
+                </button>
+
+                {selectedLatestJob ? <JobStatusBlock job={selectedLatestJob} /> : null}
+              </section>
+            </aside>
+
+            <section className="render-lane">
+              <div className="lane-heading">
+                <div>
+                  <p className="kicker">Render timeline</p>
+                  <h3>History</h3>
+                </div>
+                <span>{selectedProject.jobs.length} jobs</span>
               </div>
               <div className="jobs">
                 {selectedProject.jobs.map((job) => (
                   <JobRow key={job.id} job={job} onRetry={retryJob} />
                 ))}
-                {selectedProject.jobs.length === 0 ? <p className="empty">No generations yet</p> : null}
+                {selectedProject.jobs.length === 0 ? <p className="empty">No renders yet</p> : null}
               </div>
             </section>
           </div>
         ) : (
-          <div className="placeholder">
-            <Headphones size={36} />
-            <p>Save a project to start generating cozy English audio.</p>
+          <div className="empty-stage">
+            <Headphones size={38} />
+            <p>Create an episode to open the soundstage.</p>
           </div>
         )}
       </section>
     </main>
+  );
+}
+
+function WaveformDeck({ status }: { status: string }) {
+  return (
+    <div className={`waveform-deck ${status.toLowerCase()}`}>
+      <div className="waveform-meta">
+        <span>Signal</span>
+        <strong>{status}</strong>
+      </div>
+      <div className="waveform" aria-hidden="true">
+        {Array.from({ length: 28 }, (_, index) => (
+          <span key={index} />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -546,7 +646,8 @@ function JobRow({ job, onRetry }: { job: GenerationJob; onRetry: (job: Generatio
 
   return (
     <article className="job-row">
-      <div>
+      <div className="job-marker" aria-hidden="true" />
+      <div className="job-body">
         <div className="job-meta">
           <span className={`status-pill ${job.status.toLowerCase()}`}>{job.status}</span>
           <span>{job.voiceProfileName || job.voiceProfileCode}</span>
@@ -554,6 +655,7 @@ function JobRow({ job, onRetry }: { job: GenerationJob; onRetry: (job: Generatio
           {job.language ? <span>{job.language}</span> : null}
           <span>{job.speed.replace('_', ' ')}</span>
           <span>{job.outputFormat.toUpperCase()}</span>
+          {job.audioFile?.durationSeconds ? <span>{formatDuration(job.audioFile.durationSeconds)}</span> : null}
         </div>
         <time>{new Date(job.createdAt).toLocaleString()}</time>
         {job.emotionPrompt ? <p className="job-style">{job.emotionPrompt}</p> : null}
@@ -597,6 +699,23 @@ function extractSpeakers(text: string) {
   }
 
   return speakers;
+}
+
+function getScriptStats(text: string) {
+  const trimmed = text.trim();
+  return {
+    characters: trimmed.length,
+    words: trimmed ? trimmed.split(/\s+/).length : 0
+  };
+}
+
+function summarizeEngines(voices: VoiceProfile[]) {
+  const engines = new Set<string>();
+  for (const voice of voices) {
+    engines.add(engineLabel(voice.engine));
+  }
+
+  return Array.from(engines);
 }
 
 function seedSpeakerVoices(
@@ -649,7 +768,14 @@ function engineLabel(engine: string) {
 }
 
 function formatVoiceLabel(voice: VoiceProfile) {
-  return `${voice.displayName} · ${engineLabel(voice.engine)}`;
+  return `${voice.displayName} - ${engineLabel(voice.engine)}`;
+}
+
+function formatDuration(seconds: number) {
+  const safeSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
 function getSpeakerVoiceValue(

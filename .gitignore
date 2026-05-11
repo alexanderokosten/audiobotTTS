@@ -9,6 +9,7 @@ coverage/
 *.user
 *.suo
 .env
+.lazyweb/
 *.mp3
 *.wav
 *.flac
