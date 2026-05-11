@@ -1,0 +1,676 @@
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Download,
+  Headphones,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+  Users,
+  Volume2
+} from 'lucide-react';
+import { api } from './api';
+import type {
+  GenerationJob,
+  OutputFormat,
+  ProjectDetails,
+  ProjectSummary,
+  SpeechSpeed,
+  VoiceProfile
+} from './types';
+
+const speeds: Array<{ value: SpeechSpeed; label: string }> = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'slow', label: 'Slow' },
+  { value: 'very_slow', label: 'Very slow' }
+];
+
+const formats: Array<{ value: OutputFormat; label: string }> = [
+  { value: 'mp3', label: 'MP3' },
+  { value: 'wav', label: 'WAV' }
+];
+
+const languages = [
+  { value: '', label: 'Profile default' },
+  { value: 'Auto', label: 'Auto' },
+  { value: 'English', label: 'English' },
+  { value: 'Russian', label: 'Russian' },
+  { value: 'Chinese', label: 'Chinese' },
+  { value: 'Japanese', label: 'Japanese' },
+  { value: 'Korean', label: 'Korean' },
+  { value: 'German', label: 'German' },
+  { value: 'French', label: 'French' },
+  { value: 'Spanish', label: 'Spanish' },
+  { value: 'Italian', label: 'Italian' },
+  { value: 'Portuguese', label: 'Portuguese' }
+];
+
+export function App() {
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [selectedProject, setSelectedProject] = useState<ProjectDetails | null>(null);
+  const [voices, setVoices] = useState<VoiceProfile[]>([]);
+  const [draftTitle, setDraftTitle] = useState('Rainy Evening Dialogue');
+  const [draftText, setDraftText] = useState(
+    'Emma: It is raining again, but I like this sound.\nAlex: Me too. It makes the room feel quiet and warm.\nEmma: Let us make tea and read for a while.'
+  );
+  const [editTitle, setEditTitle] = useState('');
+  const [editText, setEditText] = useState('');
+  const [voiceProfileCode, setVoiceProfileCode] = useState('');
+  const [useDialogueVoices, setUseDialogueVoices] = useState(true);
+  const [speakerVoiceProfileCodes, setSpeakerVoiceProfileCodes] = useState<Record<string, string>>({
+    Emma: 'cozy_female',
+    Alex: 'calm_male'
+  });
+  const [speed, setSpeed] = useState<SpeechSpeed>('slow');
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>('mp3');
+  const [language, setLanguage] = useState('');
+  const [emotionPrompt, setEmotionPrompt] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const selectedLatestJob = selectedProject?.jobs[0] ?? null;
+  const hasRunningJob = selectedProject?.jobs.some(
+    (job) => job.status === 'Pending' || job.status === 'Processing'
+  );
+  const detectedSpeakers = useMemo(() => extractSpeakers(editText), [editText]);
+  const selectedVoice = useMemo(
+    () => voices.find((voice) => voice.code === voiceProfileCode) ?? null,
+    [voiceProfileCode, voices]
+  );
+  const dialogueVoiceOptions = useMemo(() => {
+    if (!selectedVoice) {
+      return voices;
+    }
+
+    return voices.filter((voice) => sameEngine(voice, selectedVoice));
+  }, [selectedVoice, voices]);
+
+  const loadProjects = useCallback(async () => {
+    const items = await api.listProjects();
+    setProjects(items);
+    return items;
+  }, []);
+
+  const loadProject = useCallback(async (id: string) => {
+    const project = await api.getProject(id);
+    setSelectedProject(project);
+    return project;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function bootstrap() {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const [voiceItems, projectItems] = await Promise.all([api.listVoices(), api.listProjects()]);
+        if (cancelled) {
+          return;
+        }
+
+        setVoices(voiceItems);
+        setProjects(projectItems);
+        setVoiceProfileCode((current) => current || voiceItems[0]?.code || '');
+        setSpeakerVoiceProfileCodes((current) => seedSpeakerVoices(current, ['Emma', 'Alex'], voiceItems));
+
+        if (projectItems[0]) {
+          await loadProject(projectItems[0].id);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(toErrorMessage(err));
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadProject]);
+
+  useEffect(() => {
+    if (!selectedProject?.id || !hasRunningJob) {
+      return;
+    }
+
+    const timer = window.setInterval(async () => {
+      try {
+        await Promise.all([loadProject(selectedProject.id), loadProjects()]);
+      } catch (err) {
+        setError(toErrorMessage(err));
+      }
+    }, 2500);
+
+    return () => window.clearInterval(timer);
+  }, [hasRunningJob, loadProject, loadProjects, selectedProject?.id]);
+
+  useEffect(() => {
+    setEditTitle(selectedProject?.title ?? '');
+    setEditText(selectedProject?.sourceText ?? '');
+  }, [selectedProject?.id, selectedProject?.sourceText, selectedProject?.title]);
+
+  useEffect(() => {
+    if (voices.length === 0 || detectedSpeakers.length === 0) {
+      return;
+    }
+
+    setSpeakerVoiceProfileCodes((current) =>
+      seedSpeakerVoices(current, detectedSpeakers, dialogueVoiceOptions, voiceProfileCode)
+    );
+  }, [detectedSpeakers, dialogueVoiceOptions, voiceProfileCode]);
+
+  const canGenerate = useMemo(() => Boolean(selectedProject && voiceProfileCode), [
+    selectedProject,
+    voiceProfileCode
+  ]);
+
+  async function createProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSaving(true);
+    setError(null);
+    try {
+      const project = await api.createProject({ title: draftTitle, sourceText: draftText });
+      setSelectedProject(project);
+      await loadProjects();
+    } catch (err) {
+      setError(toErrorMessage(err));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function selectProject(id: string) {
+    setError(null);
+    try {
+      await loadProject(id);
+    } catch (err) {
+      setError(toErrorMessage(err));
+    }
+  }
+
+  async function deleteSelectedProject() {
+    if (!selectedProject) {
+      return;
+    }
+
+    setError(null);
+    try {
+      await api.deleteProject(selectedProject.id);
+      setSelectedProject(null);
+      const items = await loadProjects();
+      if (items[0]) {
+        await loadProject(items[0].id);
+      }
+    } catch (err) {
+      setError(toErrorMessage(err));
+    }
+  }
+
+  async function updateSelectedProject() {
+    if (!selectedProject) {
+      return;
+    }
+
+    setIsUpdating(true);
+    setError(null);
+    try {
+      const project = await api.updateProject(selectedProject.id, {
+        title: editTitle,
+        sourceText: editText
+      });
+      setSelectedProject(project);
+      await loadProjects();
+    } catch (err) {
+      setError(toErrorMessage(err));
+    } finally {
+      setIsUpdating(false);
+    }
+  }
+
+  async function generateAudio() {
+    if (!selectedProject) {
+      return;
+    }
+
+    setIsGenerating(true);
+    setError(null);
+    try {
+      await api.generate(selectedProject.id, {
+        voiceProfileCode,
+        speed,
+        outputFormat,
+        language: language || undefined,
+        emotionPrompt: emotionPrompt.trim() || undefined,
+        useDialogueVoices,
+        speakerVoiceProfileCodes: useDialogueVoices
+          ? buildSpeakerVoicePayload(detectedSpeakers, speakerVoiceProfileCodes, voiceProfileCode)
+          : undefined
+      });
+      await Promise.all([loadProject(selectedProject.id), loadProjects()]);
+    } catch (err) {
+      setError(toErrorMessage(err));
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function retryJob(job: GenerationJob) {
+    setError(null);
+    try {
+      await api.retry(job.id);
+      await Promise.all([loadProject(job.projectId), loadProjects()]);
+    } catch (err) {
+      setError(toErrorMessage(err));
+    }
+  }
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">
+            <Headphones size={22} />
+          </div>
+          <div>
+            <h1>Cozy TTS</h1>
+            <p>English listening studio</p>
+          </div>
+        </div>
+
+        <form className="new-project" onSubmit={createProject}>
+          <label>
+            <span>Title</span>
+            <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} />
+          </label>
+          <label>
+            <span>Source text</span>
+            <textarea
+              rows={8}
+              value={draftText}
+              onChange={(event) => setDraftText(event.target.value)}
+            />
+          </label>
+          <button className="primary-button" type="submit" disabled={isSaving}>
+            {isSaving ? <Loader2 className="spin" size={18} /> : <Plus size={18} />}
+            Save project
+          </button>
+        </form>
+
+        <section className="project-list" aria-label="Projects">
+          {projects.map((project) => (
+            <button
+              key={project.id}
+              className={`project-row ${project.id === selectedProject?.id ? 'active' : ''}`}
+              type="button"
+              onClick={() => selectProject(project.id)}
+            >
+              <span>{project.title}</span>
+              <small>{project.jobsCount} jobs</small>
+            </button>
+          ))}
+          {!isLoading && projects.length === 0 ? <p className="empty">No projects yet</p> : null}
+        </section>
+      </aside>
+
+      <section className="workspace">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">Self-hosted Piper + Qwen TTS</p>
+            <h2>{selectedProject?.title ?? 'Create a project'}</h2>
+          </div>
+          {selectedProject ? (
+            <button className="icon-button danger" type="button" onClick={deleteSelectedProject} title="Delete project">
+              <Trash2 size={18} />
+            </button>
+          ) : null}
+        </header>
+
+        {error ? <div className="error-panel">{error}</div> : null}
+
+        {selectedProject ? (
+          <div className="content-grid">
+            <section className="panel editor-panel">
+              <div className="panel-heading">
+                <Volume2 size={18} />
+                <h3>Source</h3>
+              </div>
+              <label>
+                <span>Project title</span>
+                <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
+              </label>
+              <label>
+                <span>Source text</span>
+                <textarea
+                  className="source-view"
+                  value={editText}
+                  onChange={(event) => setEditText(event.target.value)}
+                />
+              </label>
+              <button className="primary-button save-changes" type="button" disabled={isUpdating} onClick={updateSelectedProject}>
+                {isUpdating ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
+                Save changes
+              </button>
+            </section>
+
+            <section className="panel controls-panel">
+              <div className="panel-heading">
+                <Sparkles size={18} />
+                <h3>Generation</h3>
+              </div>
+
+              <label>
+                <span>Default voice</span>
+                <select value={voiceProfileCode} onChange={(event) => setVoiceProfileCode(event.target.value)}>
+                  {voices.map((voice) => (
+                    <option key={voice.id} value={voice.code}>
+                      {formatVoiceLabel(voice)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {selectedVoice ? (
+                <div className="voice-hint">
+                  <span className="engine-badge">{engineLabel(selectedVoice.engine)}</span>
+                  {selectedVoice.qwenLanguage ? <span>{selectedVoice.qwenLanguage}</span> : null}
+                  {selectedVoice.qwenSpeaker ? <span>{selectedVoice.qwenSpeaker}</span> : null}
+                </div>
+              ) : null}
+
+              <label>
+                <span>Language</span>
+                <select value={language} onChange={(event) => setLanguage(event.target.value)}>
+                  {languages.map((item) => (
+                    <option key={item.value || 'profile'} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span>Emotion / style</span>
+                <textarea
+                  className="emotion-input"
+                  rows={3}
+                  value={emotionPrompt}
+                  placeholder="warm, calm, smiling; or Russian style instruction"
+                  onChange={(event) => setEmotionPrompt(event.target.value)}
+                />
+              </label>
+
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={useDialogueVoices}
+                  onChange={(event) => setUseDialogueVoices(event.target.checked)}
+                />
+                <span>Dialogue voices</span>
+              </label>
+
+              {useDialogueVoices ? (
+                <div className="speaker-map">
+                  <div className="panel-heading compact">
+                    <Users size={17} />
+                    <h3>Speakers</h3>
+                  </div>
+                  {(detectedSpeakers.length > 0 ? detectedSpeakers : ['Emma', 'Alex']).map((speaker) => (
+                    <label key={speaker} className="speaker-row">
+                      <span>{speaker}</span>
+                      <select
+                        value={getSpeakerVoiceValue(
+                          speaker,
+                          speakerVoiceProfileCodes,
+                          voiceProfileCode,
+                          dialogueVoiceOptions
+                        )}
+                        onChange={(event) =>
+                          setSpeakerVoiceProfileCodes((current) => ({
+                            ...current,
+                            [speaker]: event.target.value
+                          }))
+                        }
+                      >
+                        {dialogueVoiceOptions.map((voice) => (
+                          <option key={voice.id} value={voice.code}>
+                            {formatVoiceLabel(voice)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="segmented">
+                {speeds.map((item) => (
+                  <button
+                    key={item.value}
+                    className={speed === item.value ? 'selected' : ''}
+                    type="button"
+                    onClick={() => setSpeed(item.value)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="segmented">
+                {formats.map((item) => (
+                  <button
+                    key={item.value}
+                    className={outputFormat === item.value ? 'selected' : ''}
+                    type="button"
+                    onClick={() => setOutputFormat(item.value)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                className="primary-button generate"
+                type="button"
+                disabled={!canGenerate || isGenerating}
+                onClick={generateAudio}
+              >
+                {isGenerating ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
+                Generate
+              </button>
+
+              {selectedLatestJob ? <JobStatusBlock job={selectedLatestJob} /> : null}
+            </section>
+
+            <section className="panel history-panel">
+              <div className="panel-heading">
+                <RefreshCw size={18} />
+                <h3>History</h3>
+              </div>
+              <div className="jobs">
+                {selectedProject.jobs.map((job) => (
+                  <JobRow key={job.id} job={job} onRetry={retryJob} />
+                ))}
+                {selectedProject.jobs.length === 0 ? <p className="empty">No generations yet</p> : null}
+              </div>
+            </section>
+          </div>
+        ) : (
+          <div className="placeholder">
+            <Headphones size={36} />
+            <p>Save a project to start generating cozy English audio.</p>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function JobStatusBlock({ job }: { job: GenerationJob }) {
+  return (
+    <div className="status-block">
+      <div className="status-line">
+        <span className={`status-dot ${job.status.toLowerCase()}`} />
+        <strong>{job.status}</strong>
+        <span>{job.voiceProfileName || job.voiceProfileCode}</span>
+        {job.language ? <span>{job.language}</span> : null}
+        {job.useDialogueVoices ? <span>Dialogue</span> : null}
+      </div>
+
+      {job.emotionPrompt ? <p className="job-style">{job.emotionPrompt}</p> : null}
+      {job.errorMessage ? <p className="job-error">{job.errorMessage}</p> : null}
+      {job.status === 'Completed' ? (
+        <div className="player">
+          <audio controls src={api.audioUrl(job.id)} />
+          <a className="download-link" href={api.downloadUrl(job.id)}>
+            <Download size={16} />
+            Download
+          </a>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function JobRow({ job, onRetry }: { job: GenerationJob; onRetry: (job: GenerationJob) => void }) {
+  const canRetry = job.status === 'Completed' || job.status === 'Failed';
+
+  return (
+    <article className="job-row">
+      <div>
+        <div className="job-meta">
+          <span className={`status-pill ${job.status.toLowerCase()}`}>{job.status}</span>
+          <span>{job.voiceProfileName || job.voiceProfileCode}</span>
+          {job.useDialogueVoices ? <span>dialogue</span> : null}
+          {job.language ? <span>{job.language}</span> : null}
+          <span>{job.speed.replace('_', ' ')}</span>
+          <span>{job.outputFormat.toUpperCase()}</span>
+        </div>
+        <time>{new Date(job.createdAt).toLocaleString()}</time>
+        {job.emotionPrompt ? <p className="job-style">{job.emotionPrompt}</p> : null}
+        {job.errorMessage ? <p className="job-error">{job.errorMessage}</p> : null}
+      </div>
+      <div className="job-actions">
+        {job.status === 'Completed' ? (
+          <a className="icon-button" href={api.downloadUrl(job.id)} title="Download">
+            <Download size={17} />
+          </a>
+        ) : null}
+        <button className="icon-button" type="button" disabled={!canRetry} onClick={() => onRetry(job)} title="Retry">
+          <RefreshCw size={17} />
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function toErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'Unexpected error';
+}
+
+function extractSpeakers(text: string) {
+  const speakers: string[] = [];
+  const seen = new Set<string>();
+  const regex = /^(\p{L}[\p{L}\p{N} _.'-]{0,48})\s*:/u;
+
+  for (const line of text.split(/\r?\n/)) {
+    const match = regex.exec(line.trim());
+    if (!match) {
+      continue;
+    }
+
+    const speaker = match[1].trim().replace(/\s+/g, ' ');
+    const key = speaker.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      speakers.push(speaker);
+    }
+  }
+
+  return speakers;
+}
+
+function seedSpeakerVoices(
+  current: Record<string, string>,
+  speakers: string[],
+  voices: VoiceProfile[],
+  fallbackVoiceCode?: string
+) {
+  const next = { ...current };
+  const fallback = fallbackVoiceCode || voices[0]?.code || '';
+
+  for (const speaker of speakers) {
+    if (next[speaker] && voices.some((voice) => voice.code === next[speaker])) {
+      continue;
+    }
+
+    next[speaker] = pickVoiceForSpeaker(speaker, voices, fallback);
+  }
+
+  if (!next.Emma && voices.some((voice) => voice.code === 'cozy_female')) {
+    next.Emma = 'cozy_female';
+  }
+
+  if (!next.Alex && voices.some((voice) => voice.code === 'calm_male')) {
+    next.Alex = 'calm_male';
+  }
+
+  return next;
+}
+
+function pickVoiceForSpeaker(speaker: string, voices: VoiceProfile[], fallback: string) {
+  const lower = speaker.toLowerCase();
+  if (/(emma|anna|amy|sarah|mary|kate|lisa)/.test(lower) && voices.some((voice) => voice.code === 'cozy_female')) {
+    return 'cozy_female';
+  }
+
+  if (/(alex|john|tom|mark|david|ryan)/.test(lower) && voices.some((voice) => voice.code === 'calm_male')) {
+    return 'calm_male';
+  }
+
+  return fallback;
+}
+
+function sameEngine(left: VoiceProfile, right: VoiceProfile) {
+  return (left.engine || 'piper').toLowerCase() === (right.engine || 'piper').toLowerCase();
+}
+
+function engineLabel(engine: string) {
+  return engine.toLowerCase() === 'qwen3' ? 'Qwen3' : 'Piper';
+}
+
+function formatVoiceLabel(voice: VoiceProfile) {
+  return `${voice.displayName} · ${engineLabel(voice.engine)}`;
+}
+
+function getSpeakerVoiceValue(
+  speaker: string,
+  speakerVoiceProfileCodes: Record<string, string>,
+  fallbackVoiceCode: string,
+  voices: VoiceProfile[]
+) {
+  const selected = speakerVoiceProfileCodes[speaker] || fallbackVoiceCode;
+  return voices.some((voice) => voice.code === selected) ? selected : fallbackVoiceCode;
+}
+
+function buildSpeakerVoicePayload(
+  speakers: string[],
+  speakerVoiceProfileCodes: Record<string, string>,
+  fallbackVoiceCode: string
+) {
+  const payload: Record<string, string> = {};
+  for (const speaker of speakers) {
+    payload[speaker] = speakerVoiceProfileCodes[speaker] || fallbackVoiceCode;
+  }
+
+  return payload;
+}

@@ -1,0 +1,90 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cozytts-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cozytts}
+      POSTGRES_USER: ${POSTGRES_USER:-cozytts}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cozytts}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cozytts} -d ${POSTGRES_DB:-cozytts}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: src/CozyTts.Api/Dockerfile
+    container_name: cozytts-api
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      POSTGRES_CONNECTION: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-cozytts};Username=${POSTGRES_USER:-cozytts};Password=${POSTGRES_PASSWORD:-cozytts}"
+      PIPER_BIN_PATH: ${PIPER_BIN_PATH:-/opt/piper/bin/piper}
+      PIPER_MODELS_PATH: ${PIPER_MODELS_PATH:-/models}
+      FFMPEG_BIN_PATH: ${FFMPEG_BIN_PATH:-/usr/bin/ffmpeg}
+      AUDIO_OUTPUT_PATH: ${AUDIO_OUTPUT_PATH:-/data/audio}
+      TTS_TEMP_PATH: ${TTS_TEMP_PATH:-/tmp/cozytts}
+      TTS_MAX_CHUNK_CHARACTERS: ${TTS_MAX_CHUNK_CHARACTERS:-1800}
+      QWEN_TTS_ENDPOINT: ${QWEN_TTS_ENDPOINT:-http://qwen-tts:8090}
+      QWEN_TTS_TIMEOUT_MINUTES: ${QWEN_TTS_TIMEOUT_MINUTES:-30}
+      QWEN_MAX_CHUNK_CHARACTERS: ${QWEN_MAX_CHUNK_CHARACTERS:-1200}
+      QWEN_OUTPUT_SAMPLE_RATE: ${QWEN_OUTPUT_SAMPLE_RATE:-24000}
+      APPLY_MIGRATIONS: ${APPLY_MIGRATIONS:-true}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - ./models:/models:ro
+      - audio-data:/data/audio
+      - tts-tmp:/tmp/cozytts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cozytts-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  qwen-tts:
+    profiles: ["qwen"]
+    build:
+      context: ./services/qwen-tts
+      dockerfile: Dockerfile
+    container_name: cozytts-qwen-tts
+    environment:
+      HF_HOME: /cache/huggingface
+      QWEN_DEFAULT_MODEL: ${QWEN_DEFAULT_MODEL:-Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice}
+      QWEN_DEVICE_MAP: ${QWEN_DEVICE_MAP:-auto}
+      QWEN_TORCH_DTYPE: ${QWEN_TORCH_DTYPE:-}
+      QWEN_ATTN_IMPLEMENTATION: ${QWEN_ATTN_IMPLEMENTATION:-}
+    ports:
+      - "${QWEN_TTS_PORT:-8090}:8090"
+    volumes:
+      - qwen-cache:/cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+volumes:
+  postgres-data:
+  audio-data:
+  tts-tmp:
+  qwen-cache:

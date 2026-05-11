@@ -1,0 +1,21 @@
+@CozyTts.Api_HostAddress = http://localhost:5200
+
+GET {{CozyTts.Api_HostAddress}}/health
+Accept: application/json
+
+###
+
+GET {{CozyTts.Api_HostAddress}}/api/voices
+Accept: application/json
+
+###
+
+POST {{CozyTts.Api_HostAddress}}/api/projects
+Content-Type: application/json
+
+{
+  "title": "Rainy Evening Dialogue",
+  "sourceText": "Emma: It is raining again, but I like this sound.\nAlex: Me too. It makes the room feel quiet and warm."
+}
+
+###

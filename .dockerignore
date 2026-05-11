@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+**/.vscode/
+**/node_modules/
+**/dist/
+**/coverage/
+.git/
+data/
+tmp/
+models/*.onnx
+models/*.json
+frontend/node_modules/
+frontend/dist/
