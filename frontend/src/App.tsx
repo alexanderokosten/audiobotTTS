@@ -1,20 +1,12 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Activity,
-  AudioLines,
-  Clock3,
   Download,
   Headphones,
   Loader2,
   Plus,
-  Radio,
   RefreshCw,
-  Server,
-  Settings2,
-  Sparkles,
   Trash2,
-  Users,
-  Volume2
+  Users
 } from 'lucide-react';
 import { api } from './api';
 import type {
@@ -283,58 +275,43 @@ export function App() {
   }
 
   return (
-    <main className="studio-shell">
-      <header className="studio-topbar">
-        <div className="studio-brand">
+    <main className="app-shell">
+      <header className="app-header">
+        <div className="brand">
           <div className="brand-mark">
-            <Headphones size={21} />
+            <Headphones size={20} />
           </div>
           <div>
-            <p className="kicker">Self-hosted voice lab</p>
-            <h1>Cozy TTS Soundstage</h1>
+            <h1>Cozy TTS</h1>
+            <p>Local voice generator</p>
           </div>
         </div>
 
-        <div className="system-strip" aria-label="System status">
-          <span className="system-pill active">
-            <Server size={15} />
-            Local
-          </span>
-          {enabledEngines.map((engine) => (
-            <span className="system-pill" key={engine}>
-              {engine}
-            </span>
-          ))}
+        <div className="header-meta" aria-label="System status">
+          <span>{enabledEngines.length > 0 ? enabledEngines.join(' / ') : 'No engines'}</span>
           {selectedLatestJob ? (
-            <span className={`system-pill status-${selectedLatestJob.status.toLowerCase()}`}>
-              <Activity size={15} />
+            <span className={`status-label ${selectedLatestJob.status.toLowerCase()}`}>
               {selectedLatestJob.status}
             </span>
           ) : null}
           {selectedLatestJob?.audioFile?.durationSeconds ? (
-            <span className="system-pill">
-              <Clock3 size={15} />
-              {formatDuration(selectedLatestJob.audioFile.durationSeconds)}
-            </span>
+            <span>{formatDuration(selectedLatestJob.audioFile.durationSeconds)}</span>
           ) : null}
         </div>
       </header>
 
       {error ? <div className="error-panel">{error}</div> : null}
 
-      <section className="studio-layout">
-        <aside className="episode-rail">
-          <form className="episode-composer" onSubmit={createProject}>
-            <div className="rail-heading">
-              <Plus size={17} />
-              <span>New Episode</span>
-            </div>
+      <section className="app-layout">
+        <aside className="sidebar">
+          <form className="panel new-project" onSubmit={createProject}>
+            <SectionTitle title="New project" />
             <label>
               <span>Title</span>
               <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} />
             </label>
             <label>
-              <span>Script seed</span>
+              <span>Script</span>
               <textarea
                 rows={6}
                 value={draftText}
@@ -342,40 +319,39 @@ export function App() {
               />
             </label>
             <button className="primary-button" type="submit" disabled={isSaving}>
-              {isSaving ? <Loader2 className="spin" size={18} /> : <Plus size={18} />}
+              {isSaving ? <Loader2 className="spin" size={17} /> : <Plus size={17} />}
               Create
             </button>
           </form>
 
-          <section className="episode-stack" aria-label="Projects">
-            <div className="rail-heading">
-              <Radio size={17} />
-              <span>Episodes</span>
+          <section className="panel projects-panel" aria-label="Projects">
+            <SectionTitle title="Projects" detail={`${projects.length}`} />
+            <div className="project-list">
+              {projects.map((project) => (
+                <button
+                  key={project.id}
+                  className={`project-row ${project.id === selectedProject?.id ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => selectProject(project.id)}
+                >
+                  <span>{project.title}</span>
+                  <small>{project.jobsCount} renders</small>
+                </button>
+              ))}
+              {!isLoading && projects.length === 0 ? <p className="empty">No projects yet</p> : null}
             </div>
-            {projects.map((project) => (
-              <button
-                key={project.id}
-                className={`episode-card ${project.id === selectedProject?.id ? 'active' : ''}`}
-                type="button"
-                onClick={() => selectProject(project.id)}
-              >
-                <span>{project.title}</span>
-                <small>{project.jobsCount} renders</small>
-              </button>
-            ))}
-            {!isLoading && projects.length === 0 ? <p className="empty">No episodes</p> : null}
           </section>
         </aside>
 
         {selectedProject ? (
-          <div className="producer-board">
-            <section className="script-stage">
-              <div className="stage-header">
-                <div>
-                  <p className="kicker">Now editing</p>
-                  <h2>{selectedProject.title}</h2>
-                </div>
-                <div className="stage-tools">
+          <>
+            <section className="workspace">
+              <section className="panel editor-panel">
+                <div className="panel-title-row">
+                  <div>
+                    <SectionTitle title="Script" />
+                    <h2>{selectedProject.title}</h2>
+                  </div>
                   <button
                     className="icon-button danger"
                     type="button"
@@ -385,213 +361,186 @@ export function App() {
                     <Trash2 size={18} />
                   </button>
                 </div>
-              </div>
 
-              <WaveformDeck status={selectedLatestJob?.status ?? 'Idle'} />
+                <div className="stats-row" aria-label="Script metrics">
+                  <span>{scriptStats.characters.toLocaleString()} chars</span>
+                  <span>{scriptStats.words.toLocaleString()} words</span>
+                  <span>{detectedSpeakers.length || 1} speaker{(detectedSpeakers.length || 1) === 1 ? '' : 's'}</span>
+                </div>
 
-              <div className="script-metrics" aria-label="Script metrics">
-                <span>{scriptStats.characters.toLocaleString()} chars</span>
-                <span>{scriptStats.words.toLocaleString()} words</span>
-                <span>{detectedSpeakers.length || 1} speaker{(detectedSpeakers.length || 1) === 1 ? '' : 's'}</span>
-              </div>
-
-              <div className="script-card">
                 <label>
-                  <span>Episode title</span>
+                  <span>Project title</span>
                   <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
                 </label>
                 <label>
-                  <span>Dialogue script</span>
+                  <span>Text</span>
                   <textarea
                     className="source-view"
                     value={editText}
                     onChange={(event) => setEditText(event.target.value)}
                   />
                 </label>
-              </div>
 
-              <div className="speaker-strip" aria-label="Detected speakers">
-                {(detectedSpeakers.length > 0 ? detectedSpeakers : ['Narrator']).map((speaker, index) => (
-                  <span key={speaker}>
-                    <Users size={14} />
-                    Track {index + 1}: {speaker}
-                  </span>
-                ))}
-              </div>
+                <div className="detected-speakers" aria-label="Detected speakers">
+                  {(detectedSpeakers.length > 0 ? detectedSpeakers : ['Narrator']).map((speaker) => (
+                    <span key={speaker}>
+                      <Users size={14} />
+                      {speaker}
+                    </span>
+                  ))}
+                </div>
 
-              <button
-                className="secondary-button save-changes"
-                type="button"
-                disabled={isUpdating}
-                onClick={updateSelectedProject}
-              >
-                {isUpdating ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
-                Save draft
-              </button>
+                <button
+                  className="secondary-button save-changes"
+                  type="button"
+                  disabled={isUpdating}
+                  onClick={updateSelectedProject}
+                >
+                  {isUpdating ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
+                  Save changes
+                </button>
+              </section>
+
+              <section className="panel history-panel">
+                <SectionTitle title="History" detail={`${selectedProject.jobs.length} jobs`} />
+                <div className="jobs">
+                  {selectedProject.jobs.map((job) => (
+                    <JobRow key={job.id} job={job} onRetry={retryJob} />
+                  ))}
+                  {selectedProject.jobs.length === 0 ? <p className="empty">No renders yet</p> : null}
+                </div>
+              </section>
             </section>
 
-            <aside className="director-panel">
-              <section className="control-deck">
-                <div className="deck-heading">
-                  <Settings2 size={18} />
-                  <div>
-                    <h3>Voice Director</h3>
-                    <p>{selectedVoice ? engineLabel(selectedVoice.engine) : 'No voice selected'}</p>
-                  </div>
-                </div>
+            <aside className="panel settings-panel">
+              <SectionTitle title="Voice" detail={selectedVoice ? engineLabel(selectedVoice.engine) : undefined} />
 
-                <div className="engine-card">
-                  <div>
-                    <span>Render engine</span>
-                    <strong>{selectedVoice ? engineLabel(selectedVoice.engine) : 'Select voice'}</strong>
-                  </div>
-                  <AudioLines size={26} />
-                </div>
+              <label>
+                <span>Voice profile</span>
+                <select value={voiceProfileCode} onChange={(event) => setVoiceProfileCode(event.target.value)}>
+                  {voices.map((voice) => (
+                    <option key={voice.id} value={voice.code}>
+                      {formatVoiceLabel(voice)}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
+              {selectedVoice ? (
+                <p className="field-note">
+                  {[
+                    engineLabel(selectedVoice.engine),
+                    selectedVoice.qwenLanguage,
+                    selectedVoice.qwenSpeaker
+                  ].filter(Boolean).join(' - ')}
+                </p>
+              ) : null}
+
+              <div className="field-grid">
                 <label>
-                  <span>Lead voice</span>
-                  <select value={voiceProfileCode} onChange={(event) => setVoiceProfileCode(event.target.value)}>
-                    {voices.map((voice) => (
-                      <option key={voice.id} value={voice.code}>
-                        {formatVoiceLabel(voice)}
+                  <span>Language</span>
+                  <select value={language} onChange={(event) => setLanguage(event.target.value)}>
+                    {languages.map((item) => (
+                      <option key={item.value || 'profile'} value={item.value}>
+                        {item.label}
                       </option>
                     ))}
                   </select>
                 </label>
 
-                {selectedVoice ? (
-                  <div className="voice-tags">
-                    <span>{engineLabel(selectedVoice.engine)}</span>
-                    {selectedVoice.qwenLanguage ? <span>{selectedVoice.qwenLanguage}</span> : null}
-                    {selectedVoice.qwenSpeaker ? <span>{selectedVoice.qwenSpeaker}</span> : null}
-                  </div>
-                ) : null}
-
-                <div className="control-grid">
-                  <label>
-                    <span>Language</span>
-                    <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-                      {languages.map((item) => (
-                        <option key={item.value || 'profile'} value={item.value}>
-                          {item.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label>
-                    <span>Format</span>
-                    <select value={outputFormat} onChange={(event) => setOutputFormat(event.target.value as OutputFormat)}>
-                      {formats.map((item) => (
-                        <option key={item.value} value={item.value}>
-                          {item.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-
                 <label>
-                  <span>Performance note</span>
-                  <textarea
-                    className="emotion-input"
-                    rows={3}
-                    value={emotionPrompt}
-                    placeholder="warm, calm, smiling"
-                    onChange={(event) => setEmotionPrompt(event.target.value)}
-                  />
+                  <span>Format</span>
+                  <select value={outputFormat} onChange={(event) => setOutputFormat(event.target.value as OutputFormat)}>
+                    {formats.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
+              </div>
 
-                <div className="speed-rack" aria-label="Speech speed">
-                  {speeds.map((item) => (
-                    <button
-                      key={item.value}
-                      className={speed === item.value ? 'selected' : ''}
-                      type="button"
-                      onClick={() => setSpeed(item.value)}
-                    >
-                      {item.label}
-                    </button>
+              <label>
+                <span>Style note</span>
+                <textarea
+                  className="emotion-input"
+                  rows={3}
+                  value={emotionPrompt}
+                  placeholder="warm, calm, smiling"
+                  onChange={(event) => setEmotionPrompt(event.target.value)}
+                />
+              </label>
+
+              <div className="choice-row" aria-label="Speech speed">
+                {speeds.map((item) => (
+                  <button
+                    key={item.value}
+                    className={speed === item.value ? 'selected' : ''}
+                    type="button"
+                    onClick={() => setSpeed(item.value)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={useDialogueVoices}
+                  onChange={(event) => setUseDialogueVoices(event.target.checked)}
+                />
+                <span>Separate voices for dialogue</span>
+              </label>
+
+              {useDialogueVoices ? (
+                <div className="cast-panel">
+                  <SectionTitle title="Cast" />
+                  {(detectedSpeakers.length > 0 ? detectedSpeakers : ['Emma', 'Alex']).map((speaker) => (
+                    <label key={speaker} className="speaker-row">
+                      <span>{speaker}</span>
+                      <select
+                        value={getSpeakerVoiceValue(
+                          speaker,
+                          speakerVoiceProfileCodes,
+                          voiceProfileCode,
+                          dialogueVoiceOptions
+                        )}
+                        onChange={(event) =>
+                          setSpeakerVoiceProfileCodes((current) => ({
+                            ...current,
+                            [speaker]: event.target.value
+                          }))
+                        }
+                      >
+                        {dialogueVoiceOptions.map((voice) => (
+                          <option key={voice.id} value={voice.code}>
+                            {formatVoiceLabel(voice)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   ))}
                 </div>
+              ) : null}
 
-                <label className="toggle-row">
-                  <input
-                    type="checkbox"
-                    checked={useDialogueVoices}
-                    onChange={(event) => setUseDialogueVoices(event.target.checked)}
-                  />
-                  <span>Separate dialogue voices</span>
-                </label>
+              <button
+                className="primary-button generate"
+                type="button"
+                disabled={!canGenerate || isGenerating}
+                onClick={generateAudio}
+              >
+                {isGenerating ? <Loader2 className="spin" size={17} /> : null}
+                Generate
+              </button>
 
-                {useDialogueVoices ? (
-                  <div className="cast-board">
-                    <div className="rail-heading">
-                      <Users size={17} />
-                      <span>Cast</span>
-                    </div>
-                    {(detectedSpeakers.length > 0 ? detectedSpeakers : ['Emma', 'Alex']).map((speaker) => (
-                      <label key={speaker} className="speaker-row">
-                        <span>{speaker}</span>
-                        <select
-                          value={getSpeakerVoiceValue(
-                            speaker,
-                            speakerVoiceProfileCodes,
-                            voiceProfileCode,
-                            dialogueVoiceOptions
-                          )}
-                          onChange={(event) =>
-                            setSpeakerVoiceProfileCodes((current) => ({
-                              ...current,
-                              [speaker]: event.target.value
-                            }))
-                          }
-                        >
-                          {dialogueVoiceOptions.map((voice) => (
-                            <option key={voice.id} value={voice.code}>
-                              {formatVoiceLabel(voice)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ))}
-                  </div>
-                ) : null}
-
-                <button
-                  className="primary-button generate"
-                  type="button"
-                  disabled={!canGenerate || isGenerating}
-                  onClick={generateAudio}
-                >
-                  {isGenerating ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
-                  Render audio
-                </button>
-
-                {selectedLatestJob ? <JobStatusBlock job={selectedLatestJob} /> : null}
-              </section>
+              {selectedLatestJob ? <JobStatusBlock job={selectedLatestJob} /> : null}
             </aside>
-
-            <section className="render-lane">
-              <div className="lane-heading">
-                <div>
-                  <p className="kicker">Render timeline</p>
-                  <h3>History</h3>
-                </div>
-                <span>{selectedProject.jobs.length} jobs</span>
-              </div>
-              <div className="jobs">
-                {selectedProject.jobs.map((job) => (
-                  <JobRow key={job.id} job={job} onRetry={retryJob} />
-                ))}
-                {selectedProject.jobs.length === 0 ? <p className="empty">No renders yet</p> : null}
-              </div>
-            </section>
-          </div>
+          </>
         ) : (
-          <div className="empty-stage">
-            <Headphones size={38} />
-            <p>Create an episode to open the soundstage.</p>
+          <div className="panel empty-state">
+            <Headphones size={34} />
+            <p>Create a project to start generating audio.</p>
           </div>
         )}
       </section>
@@ -599,18 +548,11 @@ export function App() {
   );
 }
 
-function WaveformDeck({ status }: { status: string }) {
+function SectionTitle({ title, detail }: { title: string; detail?: string }) {
   return (
-    <div className={`waveform-deck ${status.toLowerCase()}`}>
-      <div className="waveform-meta">
-        <span>Signal</span>
-        <strong>{status}</strong>
-      </div>
-      <div className="waveform" aria-hidden="true">
-        {Array.from({ length: 28 }, (_, index) => (
-          <span key={index} />
-        ))}
-      </div>
+    <div className="section-title">
+      <span>{title}</span>
+      {detail ? <small>{detail}</small> : null}
     </div>
   );
 }
@@ -646,7 +588,6 @@ function JobRow({ job, onRetry }: { job: GenerationJob; onRetry: (job: Generatio
 
   return (
     <article className="job-row">
-      <div className="job-marker" aria-hidden="true" />
       <div className="job-body">
         <div className="job-meta">
           <span className={`status-pill ${job.status.toLowerCase()}`}>{job.status}</span>
